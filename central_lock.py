@@ -14,14 +14,14 @@ First, you should connect to a redis server. For example,
 
 After that, you will be able to use central_lock or central_lock_block in this way:
 
-    with central_lock('YOUR_KEY_FOR_THIS_LOCK', timeout=None, retry_cnt=3) as lock:
+    with central_lock(redis_client, 'YOUR_KEY_FOR_THIS_LOCK', timeout=None, retry_cnt=3) as lock:
         if lock:
             # do things where should be protected by the central lock
             ...
 
     or:
 
-    with central_lock_block('YOUR_KEY_FOR_THIS_LOCK', timeout=None, retry_cnt=3, interval=1) as lock:
+    with central_lock_block(redis_client, 'YOUR_KEY_FOR_THIS_LOCK', timeout=None, retry_cnt=3, interval=1) as lock:
         if lock:
             # do things where should be protected by the central lock
             ...
@@ -34,14 +34,16 @@ After that, you will be able to use central_lock or central_lock_block in this w
 
     central_lock will always wait for the lock, and set the lock with timeout if setting the timeout.
     If not, it will retry every interval seconds.
+
+    You should create a redis client like this:
+
+    redis_client = redis.Redis(host="127.0.0.1", port=6379, db=0, socket_connect_timeout=3, socket_timeout=3)
 """
 
 
-redis_client = redis.Redis(host="127.0.0.1", port=6379, db=0, socket_connect_timeout=3, socket_timeout=3)
-
-
 @contextmanager
-def central_lock(key, timeout=None, retry_cnt=3):
+def central_lock(redis_client, key, timeout=None, retry_cnt=3):
+    get_lock = False
     try:
         if redis_client.setnx(key, 1) is True:
             if timeout:
@@ -53,16 +55,19 @@ def central_lock(key, timeout=None, retry_cnt=3):
                 if retry_cnt == 0:
                     redis_client.delete(key)
                     yield False
+            get_lock = True
             yield True
         else:
             yield False
 
     finally:
-        redis_client.delete(key)
+        if get_lock:
+            redis_client.delete(key)
 
 
 @contextmanager
-def central_lock_block(key, timeout=None, retry_cnt=3, interval=1):
+def central_lock_block(redis_client, key, timeout=None, retry_cnt=3, interval=1):
+    get_lock = False
     try:
         while True:
             if redis_client.setnx(key, 1) is True:
@@ -75,6 +80,7 @@ def central_lock_block(key, timeout=None, retry_cnt=3, interval=1):
                     if retry_cnt == 0:
                         redis_client.delete(key)
                         continue
+                get_lock = True
                 yield True
                 break
             else:
@@ -82,4 +88,5 @@ def central_lock_block(key, timeout=None, retry_cnt=3, interval=1):
                 continue
 
     finally:
-        redis_client.delete(key)
+        if get_lock:
+            redis_client.delete(key)
